@@ -2,7 +2,6 @@ package _generated
 
 import (
 	"github.com/philhofer/msgp/msgp"
-	"strconv"
 	"time"
 )
 
@@ -72,15 +71,51 @@ type Things struct {
 
 type Empty struct{}
 
-func atoi(s string) int { i, _ := strconv.Atoi(s); return i }
+type MyEnum byte
 
-func itoa(i int) string { return strconv.Itoa(i) }
+const (
+	A MyEnum = iota
+	B
+	C
+	D
+	invalid
+)
+
+func (m MyEnum) String() string {
+	switch m {
+	case A:
+		return "A"
+	case B:
+		return "B"
+	case C:
+		return "C"
+	case D:
+		return "D"
+	default:
+		return "<invalid>"
+	}
+}
+
+func myenumStr(s string) MyEnum {
+	switch s {
+	case "A":
+		return A
+	case "B":
+		return B
+	case "C":
+		return C
+	case "D":
+		return D
+	default:
+		return invalid
+	}
+}
 
 type Custom struct {
-	Int       map[string]CustomInt
-	Bts       CustomBytes
-	Mp        map[string]*Embedded
-	Customint int `msg:"customint,as:string,using:itoa/atoi"` // test explicit shim
+	Int  map[string]CustomInt
+	Bts  CustomBytes
+	Mp   map[string]*Embedded
+	Enum MyEnum `msg:"enum,as:string,using:(MyEnum).String/myenumStr"` // test explicit enum shim
 }
 type CustomInt int
 type CustomBytes []byte

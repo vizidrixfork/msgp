@@ -486,6 +486,8 @@ func pullIdent(name string) gen.Base {
 	switch name {
 	case "string":
 		return gen.String
+	case "[]byte":
+		return gen.Bytes
 	case "byte":
 		return gen.Byte
 	case "int":
@@ -522,6 +524,8 @@ func pullIdent(name string) gen.Base {
 		return gen.Time
 	case "interface{}":
 		return gen.Intf
+	case "msgp.Extension", "Extension":
+		return gen.Ext
 	default:
 		// unrecognized identity
 		return gen.IDENT
