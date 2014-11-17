@@ -2,6 +2,7 @@ package _generated
 
 import (
 	"github.com/philhofer/msgp/msgp"
+	"strconv"
 	"time"
 )
 
@@ -71,10 +72,15 @@ type Things struct {
 
 type Empty struct{}
 
+func atoi(s string) int { i, _ := strconv.Atoi(s); return i }
+
+func itoa(i int) string { return strconv.Itoa(i) }
+
 type Custom struct {
-	Int map[string]CustomInt
-	Bts CustomBytes
-	Mp  map[string]*Embedded
+	Int       map[string]CustomInt
+	Bts       CustomBytes
+	Mp        map[string]*Embedded
+	Customint int `msg:"customint,as:string,using:itoa/atoi"` // test explicit shim
 }
 type CustomInt int
 type CustomBytes []byte

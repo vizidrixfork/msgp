@@ -265,8 +265,25 @@ for_fields:
 
 			// check for a tag like `msg:"name,extension"`
 			tags := strings.Split(body, ",")
-			if len(tags) > 1 && tags[1] == "extension" {
-				flagExtension = true
+			switch len(tags) {
+			case 2:
+				if tags[1] == "extension" {
+					flagExtension = true
+				}
+			case 3:
+				// special case: explicit type shim
+				if strings.HasPrefix(tags[1], "as:") && strings.HasPrefix(tags[2], "using:") {
+					tp, to, from := parseShim(tags[1], tags[2])
+					sf.FieldTag = tags[0]
+					sf.FieldElem = &gen.BaseElem{
+						Value:        tp,
+						Convert:      true,
+						ShimToBase:   to,
+						ShimFromBase: from,
+					}
+					out = append(out, sf)
+					continue for_fields
+				}
 			}
 			sf.FieldTag = tags[0]
 		}
@@ -451,6 +468,18 @@ func parseExpr(e ast.Expr) gen.Elem {
 	default: // other types not supported
 		return nil
 	}
+}
+
+// parse shim like "as:string,using:toString/fromString"
+func parseShim(as string, using string) (tp gen.Base, toShim string, fromShim string) {
+	tp = pullIdent(strings.TrimPrefix(as, "as:"))
+	lrs := strings.Split(strings.TrimPrefix(using, "using:"), "/")
+	if len(lrs) == 2 {
+		toShim, fromShim = lrs[0], lrs[1]
+	} else {
+		toShim, fromShim = tp.String(), tp.String()
+	}
+	return
 }
 
 func pullIdent(name string) gen.Base {
