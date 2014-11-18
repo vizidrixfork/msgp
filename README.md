@@ -2,7 +2,7 @@ MessagePack Code Generator
 =======
 
 [![forthebadge](http://forthebadge.com/badges/uses-badges.svg)](http://forthebadge.com)
-[![forthebadge](http://forthebadge.com/badges/certified-snoop-lion.svg)](http://forthebadge.com)
+[![forthebadge](http://forthebadge.com/badges/ages-12.svg)](http://forthebadge.com)
 
 This is a code generation tool and serialization library for [MesssagePack](http://msgpack.org). It is targeted at the `go generate` [tool](http://tip.golang.org/cmd/go/#hdr-Generate_Go_files_by_processing_source). You can read more about MessagePack [in the wiki](http://github.com/philhofer/msgp/wiki), or at [msgpack.org](http://msgp.org).
 

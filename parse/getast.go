@@ -1,7 +1,6 @@
 package parse
 
 import (
-	"errors"
 	"fmt"
 	"github.com/philhofer/msgp/gen"
 	"github.com/ttacon/chalk"
@@ -11,16 +10,6 @@ import (
 	"os"
 	"reflect"
 	"strings"
-)
-
-type Identity uint8
-
-const (
-	IDENT Identity = iota
-	Struct
-	Builtin
-	Map
-	Unsupported
 )
 
 var (
@@ -66,11 +55,9 @@ func GetAST(filename string) (files []*ast.File, pkgName string, err error) {
 		for _, pkg = range pkgs {
 			pkgName = pkg.Name
 		}
-		files = make([]*ast.File, len(pkg.Files))
-		var i = 0
+		files = make([]*ast.File, 0, len(pkg.Files))
 		for _, file := range pkg.Files {
-			files[i] = file
-			i++
+			files = append(files, file)
 		}
 		return
 	}
@@ -80,7 +67,7 @@ func GetAST(filename string) (files []*ast.File, pkgName string, err error) {
 		return
 	}
 	if !ast.FileExports(f) {
-		f, err = nil, errors.New("no exports in file")
+		f, err = nil, fmt.Errorf("no exported definitions in %s", filename)
 	}
 	files = []*ast.File{f}
 	if f != nil {
@@ -89,22 +76,27 @@ func GetAST(filename string) (files []*ast.File, pkgName string, err error) {
 	return
 }
 
-// GetElems gets the generator elements out of a file (may be nil)
+// GetElems opens the file at "filename", extracts all of the
+// type specifications, and converts each "supported" type spec (*ast.StructType)
+// to a gen.Elem. (Also returns the package name as a string.)
+//
+// May return emtpy values if there are no useful specs, etc.
+//
 func GetElems(filename string) ([]gen.Elem, string, error) {
 	f, pkg, err := GetAST(filename)
 	if err != nil {
 		return nil, "", err
 	}
 
-	var specs []*ast.TypeSpec
+	specs := make([]*ast.TypeSpec, 0, len(f))
 	for _, file := range f {
 		specs = append(specs, GetTypeSpecs(file)...)
 	}
-	if specs == nil {
-		return nil, "", nil
+	if len(specs) == 0 {
+		return nil, pkg, nil
 	}
 
-	var out []gen.Elem
+	out := make([]gen.Elem, 0, len(specs))
 	for i := range specs {
 		el := GenElem(specs[i])
 		if el != nil {
@@ -115,7 +107,7 @@ func GetElems(filename string) ([]gen.Elem, string, error) {
 	var ptd bool
 	for _, o := range out {
 		unr := findUnresolved(o)
-		if unr != nil {
+		if len(unr) > 0 {
 			if !ptd {
 				fmt.Println(chalk.Yellow.Color("Non-local or unresolved identifiers:"))
 				ptd = true
@@ -129,7 +121,7 @@ func GetElems(filename string) ([]gen.Elem, string, error) {
 	return out, pkg, nil
 }
 
-// should return a list of *ast.TypeSpec we are interested in
+// GetTypeSpecs extracts all of the *ast.TypeSpecs in the file.
 func GetTypeSpecs(f *ast.File) []*ast.TypeSpec {
 	var out []*ast.TypeSpec
 
@@ -184,7 +176,8 @@ func GetTypeSpecs(f *ast.File) []*ast.TypeSpec {
 
 // GenElem creates the gen.Elem out of an
 // ast.TypeSpec. Right now the only supported
-// TypeSpec.Type is *ast.StructType
+// TypeSpec.Type is *ast.StructType. Unsupported
+// types will yield a 'nil' return value.
 func GenElem(in *ast.TypeSpec) gen.Elem {
 	// handle supported types
 	switch in.Type.(type) {
@@ -215,6 +208,7 @@ func GenElem(in *ast.TypeSpec) gen.Elem {
 	}
 }
 
+// this is where most of the magic happens
 func parseFieldList(fl *ast.FieldList) []gen.StructField {
 	if fl == nil || fl.NumFields() == 0 {
 		return nil
@@ -263,25 +257,30 @@ for_fields:
 			// to convert to reflect.StructTag
 			body := reflect.StructTag(strings.Trim(field.Tag.Value, "`")).Get("msg")
 
-			// check for a tag like `msg:"name,extension"`
 			tags := strings.Split(body, ",")
 			switch len(tags) {
 			case 2:
+				// special case: explicit Extension conversion as `msg:"{name},extension"`
 				if tags[1] == "extension" {
 					flagExtension = true
+				} else {
+					fmt.Printf(chalk.Yellow.Color(" (\u26a0 unknown tag %q)"), tags[1])
 				}
 			case 3:
-				// special case: explicit type shim
+				// special case: explicit type shim as `msg:"{name},as:{type},using:{to}/{from}"`
 				if strings.HasPrefix(tags[1], "as:") && strings.HasPrefix(tags[2], "using:") {
-					tp, to, from := parseShim(tags[1], tags[2])
-					sf.FieldTag = tags[0]
-					sf.FieldElem = &gen.BaseElem{
-						Value:        tp,
-						Convert:      true,
-						ShimToBase:   to,
-						ShimFromBase: from,
+					if tp, to, from := parseShim(tags[1], tags[2]); to != "" && from != "" {
+						sf.FieldTag = tags[0]
+						sf.FieldElem = &gen.BaseElem{
+							Value:        tp,
+							Convert:      true,
+							ShimToBase:   to,
+							ShimFromBase: from,
+						}
+						out = append(out, sf)
+					} else {
+						fmt.Printf(chalk.Yellow.Color("  (\u26a0 couldn't parse: %q)"), body)
 					}
-					out = append(out, sf)
 					continue for_fields
 				}
 			}
@@ -342,29 +341,26 @@ func embedded(f ast.Expr) string {
 	}
 }
 
-// go from ast.Expr to gen.Elem; nil means type not supported
+// recursively translate ast.Expr to gen.Elem; nil means type not supported
+// expected input types:
+// - *ast.MapType (map[T]J)
+// - *ast.Ident (name)
+// - *ast.ArrayType ([(sz)]T)
+// - *ast.StarExpr (*T)
+// - *ast.StructType (struct {})
+// - *ast.SelectorExpr (a.B)
+// - *ast.InterfaceType (interface {})
 func parseExpr(e ast.Expr) gen.Elem {
 	switch e.(type) {
 
 	case *ast.MapType:
-		switch e.(*ast.MapType).Key.(type) {
-		case *ast.Ident:
-			switch e.(*ast.MapType).Key.(*ast.Ident).Name {
-			case "string":
-				inner := parseExpr(e.(*ast.MapType).Value)
-				if inner == nil {
-					return nil
-				}
-				return &gen.Map{
-					Value: inner,
-				}
-			default:
-				return nil
+		m := e.(*ast.MapType)
+		if k, ok := m.Key.(*ast.Ident); ok && k.Name == "string" {
+			if in := parseExpr(m.Value); in != nil {
+				return &gen.Map{Value: in}
 			}
-		default:
-			// we don't support non-string map keys
-			return nil
 		}
+		return nil
 
 	case *ast.Ident:
 		b := &gen.BaseElem{
@@ -378,75 +374,59 @@ func parseExpr(e ast.Expr) gen.Elem {
 	case *ast.ArrayType:
 		arr := e.(*ast.ArrayType)
 
+		// special case for []byte
+		if arr.Len == nil {
+			if i, ok := arr.Elt.(*ast.Ident); ok && i.Name == "byte" {
+				return &gen.BaseElem{Value: gen.Bytes}
+			}
+		}
+
+		// return early if we don't know
+		// what the slice element type is
+		els := parseExpr(arr.Elt)
+		if els == nil {
+			return nil
+		}
+
 		// array and not a slice
 		if arr.Len != nil {
 			switch arr.Len.(type) {
 			case *ast.BasicLit:
 				return &gen.Array{
 					Size: arr.Len.(*ast.BasicLit).Value,
-					Els:  parseExpr(arr.Elt),
+					Els:  els,
 				}
 
 			case *ast.Ident:
 				return &gen.Array{
 					Size: arr.Len.(*ast.Ident).String(),
-					Els:  parseExpr(arr.Elt),
+					Els:  els,
 				}
 
-			default:
+			default: // TODO: support *ast.SelectorExpr
 				return nil
 			}
 		}
-
-		// special case for []byte; others go to gen.Slice
-		switch arr.Elt.(type) {
-		case *ast.Ident:
-			i := arr.Elt.(*ast.Ident)
-			if i.Name == "byte" {
-				return &gen.BaseElem{
-					Value: gen.Bytes,
-				}
-			} else {
-				e := parseExpr(arr.Elt)
-				if e == nil {
-					return nil
-				}
-				return &gen.Slice{
-					Els: e,
-				}
-			}
-		default:
-			e := parseExpr(arr.Elt)
-			if e == nil {
-				return nil
-			}
-			return &gen.Slice{
-				Els: e,
-			}
-
-		}
+		return &gen.Slice{Els: els}
 
 	case *ast.StarExpr:
-		v := parseExpr(e.(*ast.StarExpr).X)
-		if v == nil {
-			return nil
+		if v := parseExpr(e.(*ast.StarExpr).X); v != nil {
+			return &gen.Ptr{Value: v}
 		}
-		return &gen.Ptr{
-			Value: v,
-		}
+		return nil
 
 	case *ast.StructType:
-		return &gen.Struct{
-			Fields: parseFieldList(e.(*ast.StructType).Fields),
+		if fields := parseFieldList(e.(*ast.StructType).Fields); len(fields) > 0 {
+			return &gen.Struct{Fields: fields}
 		}
+		return nil
 
 	case *ast.SelectorExpr:
 		v := e.(*ast.SelectorExpr)
+		// special case for time.Time; others go to Ident
 		if im, ok := v.X.(*ast.Ident); ok {
 			if v.Sel.Name == "Time" && im.Name == "time" {
-				return &gen.BaseElem{
-					Value: gen.Time,
-				}
+				return &gen.BaseElem{Value: gen.Time}
 			} else {
 				return &gen.BaseElem{
 					Value: gen.IDENT,
@@ -459,9 +439,7 @@ func parseExpr(e ast.Expr) gen.Elem {
 	case *ast.InterfaceType:
 		// support `interface{}`
 		if len(e.(*ast.InterfaceType).Methods.List) == 0 {
-			return &gen.BaseElem{
-				Value: gen.Intf,
-			}
+			return &gen.BaseElem{Value: gen.Intf}
 		}
 		return nil
 
@@ -470,14 +448,12 @@ func parseExpr(e ast.Expr) gen.Elem {
 	}
 }
 
-// parse shim like "as:string,using:toString/fromString"
+// parse shim: "as:{type}", "using:{toShim}/{fromShim}""
 func parseShim(as string, using string) (tp gen.Base, toShim string, fromShim string) {
 	tp = pullIdent(strings.TrimPrefix(as, "as:"))
 	lrs := strings.Split(strings.TrimPrefix(using, "using:"), "/")
 	if len(lrs) == 2 {
 		toShim, fromShim = lrs[0], lrs[1]
-	} else {
-		toShim, fromShim = tp.String(), tp.String()
 	}
 	return
 }
