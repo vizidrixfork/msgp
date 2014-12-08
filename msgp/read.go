@@ -950,6 +950,12 @@ fill:
 		s, err = "", nil
 		return
 	}
+	// reading into the memory
+	// that will become the string
+	// itself has vastly superior
+	// worst-case performance, because
+	// the reader buffer doesn't have
+	// to be large enough to hold the string.
 	out := make([]byte, read)
 	_, err = m.r.ReadFull(out)
 	if err != nil {

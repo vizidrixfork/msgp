@@ -337,51 +337,42 @@ func rwString(dst jsWriter, src *Reader) (n int, err error) {
 	}
 	lead := p[0]
 	var read int
-	var off int
+
 	if isfixstr(lead) {
-		k := int(rfixstr(lead)) + 1
-		p, err = src.r.Peek(k)
-		if err != nil {
-			return
-		}
-		n, err = rwquoted(dst, p[1:])
-		src.r.Skip(k)
-		return
+		read = int(rfixstr(lead))
+		src.r.Skip(1)
+		goto write
 	}
 
 	switch lead {
 	case mstr8:
-		p, err = src.r.Peek(2)
+		p, err = src.r.Next(2)
 		if err != nil {
 			return
 		}
 		read = int(uint8(p[1]))
-		off = 2
 	case mstr16:
-		p, err = src.r.Peek(3)
+		p, err = src.r.Next(3)
 		if err != nil {
 			return
 		}
 		read = int(big.Uint16(p[1:]))
-		off = 3
 	case mstr32:
-		p, err = src.r.Peek(5)
+		p, err = src.r.Next(5)
 		if err != nil {
 			return
 		}
 		read = int(big.Uint32(p[1:]))
-		off = 5
 	default:
 		err = TypeError{Method: StrType, Encoded: getType(lead)}
 		return
 	}
-	k := read + off
-	p, err = src.r.Peek(k)
+write:
+	p, err = src.r.Next(read)
 	if err != nil {
 		return
 	}
-	n, err = rwquoted(dst, p[off:])
-	src.r.Skip(k)
+	n, err = rwquoted(dst, p)
 	return
 }
 
