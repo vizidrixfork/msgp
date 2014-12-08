@@ -432,21 +432,19 @@ func (m *Reader) ReadMapHeader() (sz uint32, err error) {
 	}
 	switch lead {
 	case mmap16:
-		p, err = m.r.Peek(3)
+		p, err = m.r.Next(3)
 		if err != nil {
 			return
 		}
 		usz := big.Uint16(p[1:])
 		sz = uint32(usz)
-		_, err = m.r.Skip(3)
 		return
 	case mmap32:
-		p, err = m.r.Peek(5)
+		p, err = m.r.Next(5)
 		if err != nil {
 			return
 		}
 		sz = big.Uint32(p[1:])
-		_, err = m.r.Skip(5)
 		return
 	default:
 		err = TypeError{Method: MapType, Encoded: getType(lead)}
@@ -486,22 +484,19 @@ func (m *Reader) ReadArrayHeader() (sz uint32, err error) {
 	}
 	switch lead {
 	case marray16:
-		p, err = m.r.Peek(3)
+		p, err = m.r.Next(3)
 		if err != nil {
 			return
 		}
-		usz := big.Uint16(p[1:])
-		sz = uint32(usz)
-		_, err = m.r.Skip(3)
+		sz = uint32(big.Uint16(p[1:]))
 		return
 
 	case marray32:
-		p, err = m.r.Peek(5)
+		p, err = m.r.Next(5)
 		if err != nil {
 			return
 		}
 		sz = big.Uint32(p[1:])
-		_, err = m.r.Skip(5)
 		return
 
 	default:
@@ -609,39 +604,35 @@ func (m *Reader) ReadInt64() (i int64, err error) {
 	}
 	switch lead {
 	case mint8:
-		p, err = m.r.Peek(2)
+		p, err = m.r.Next(2)
 		if err != nil {
 			return
 		}
 		i = int64(getMint8(p))
-		_, err = m.r.Skip(2)
 		return
 
 	case mint16:
-		p, err = m.r.Peek(3)
+		p, err = m.r.Next(3)
 		if err != nil {
 			return
 		}
 		i = int64(getMint16(p))
-		_, err = m.r.Skip(3)
 		return
 
 	case mint32:
-		p, err = m.r.Peek(5)
+		p, err = m.r.Next(5)
 		if err != nil {
 			return
 		}
 		i = int64(getMint32(p))
-		_, err = m.r.Skip(5)
 		return
 
 	case mint64:
-		p, err = m.r.Peek(9)
+		p, err = m.r.Next(9)
 		if err != nil {
 			return
 		}
 		i = getMint64(p)
-		_, err = m.r.Skip(9)
 		return
 
 	default:
@@ -716,39 +707,35 @@ func (m *Reader) ReadUint64() (u uint64, err error) {
 	}
 	switch lead {
 	case muint8:
-		p, err = m.r.Peek(2)
+		p, err = m.r.Next(2)
 		if err != nil {
 			return
 		}
 		u = uint64(getMuint8(p))
-		_, err = m.r.Skip(2)
 		return
 
 	case muint16:
-		p, err = m.r.Peek(3)
+		p, err = m.r.Next(3)
 		if err != nil {
 			return
 		}
 		u = uint64(getMuint16(p))
-		_, err = m.r.Skip(3)
 		return
 
 	case muint32:
-		p, err = m.r.Peek(5)
+		p, err = m.r.Next(5)
 		if err != nil {
 			return
 		}
 		u = uint64(getMuint32(p))
-		_, err = m.r.Skip(5)
 		return
 
 	case muint64:
-		p, err = m.r.Peek(9)
+		p, err = m.r.Next(9)
 		if err != nil {
 			return
 		}
 		u = getMuint64(p)
-		_, err = m.r.Skip(9)
 		return
 
 	default:
@@ -820,53 +807,51 @@ func (m *Reader) ReadBytes(scratch []byte) (b []byte, err error) {
 	}
 	lead = p[0]
 	var read int
-	var off int
 	switch lead {
 	case mbin8:
 		read = int(p[1])
-		off = 2
+		m.r.Skip(2)
 	case mbin16:
-		p, err = m.r.Peek(3)
+		p, err = m.r.Next(3)
 		if err != nil {
 			return
 		}
 		read = int(big.Uint16(p[1:]))
-		off = 3
 	case mbin32:
-		p, err = m.r.Peek(5)
+		p, err = m.r.Next(5)
 		if err != nil {
 			return
 		}
 		read = int(big.Uint32(p[1:]))
-		off = 5
 	default:
 		err = TypeError{Method: BinType, Encoded: getType(lead)}
 		return
 	}
-	b, err = readN(m, scratch, off, read)
-	return
-}
-
-func readN(r *Reader, scratch []byte, off int, read int) (b []byte, err error) {
-	if read == 0 {
-		b = scratch[0:0]
-		_, err = r.r.Skip(off)
-		return
-	}
-	if read > cap(scratch) {
+	if cap(scratch) < read {
 		b = make([]byte, read)
 	} else {
 		b = scratch[0:read]
 	}
-	var p []byte
-	p, err = r.r.Peek(off + read)
-	if err != nil {
-		return nil, err
-	}
-	copy(b, p[off:])
-	_, err = r.r.Skip(off + read)
+	_, err = m.r.ReadFull(b)
 	return
 }
+
+/*
+func readN(r *Reader, scratch []byte, off int, read int) (b []byte, err error) {
+	_, err = r.r.Skip(off)
+	if err != nil {
+		return
+	}
+	if read > 0 {
+		if read > cap(scratch) {
+			b = make([]byte, read)
+		} else {
+			b = scratch[0:read]
+		}
+		_, err = r.r.ReadFull(b)
+	}
+	return
+}*/
 
 // ReadStringAsBytes reads a MessagePack 'str' (utf-8) string
 // and returns its value as bytes. It may use 'scratch' for storage
@@ -880,42 +865,43 @@ func (m *Reader) ReadStringAsBytes(scratch []byte) (b []byte, err error) {
 	}
 	lead = p[0]
 	var read int
-	var off int
 
 	if isfixstr(lead) {
 		read = int(rfixstr(lead))
-		off = 1
-		b, err = readN(m, scratch, off, read)
-		return
+		m.r.Skip(1)
+		goto fill
 	}
 
 	switch lead {
 	case mstr8:
-		p, err = m.r.Peek(2)
+		p, err = m.r.Next(2)
 		if err != nil {
 			return
 		}
 		read = int(uint8(p[1]))
-		off = 2
 	case mstr16:
-		p, err = m.r.Peek(3)
+		p, err = m.r.Next(3)
 		if err != nil {
 			return
 		}
 		read = int(big.Uint16(p[1:]))
-		off = 3
 	case mstr32:
-		p, err = m.r.Peek(5)
+		p, err = m.r.Next(5)
 		if err != nil {
 			return
 		}
 		read = int(big.Uint32(p[1:]))
-		off = 5
 	default:
 		err = TypeError{Method: StrType, Encoded: getType(lead)}
 		return
 	}
-	b, err = readN(m, scratch, off, read)
+fill:
+	if cap(scratch) < read {
+		b = make([]byte, read)
+	} else {
+		b = scratch[0:read]
+	}
+	_, err = m.r.ReadFull(b)
 	return
 }
 
@@ -923,58 +909,53 @@ func (m *Reader) ReadStringAsBytes(scratch []byte) (b []byte, err error) {
 func (m *Reader) ReadString() (s string, err error) {
 	var p []byte
 	var lead byte
+	var read int
 	p, err = m.r.Peek(1)
 	if err != nil {
 		return
 	}
 	lead = p[0]
-	var read int
-	var off int
 
 	if isfixstr(lead) {
-		k := int(rfixstr(lead)) + 1
-		p, err = m.r.Peek(k)
-		if err != nil {
-			return
-		}
-		s = string(p[1:])
-		_, err = m.r.Skip(k)
-		return
+		read = int(rfixstr(lead))
+		m.r.Skip(1)
+		goto fill
 	}
 
 	switch lead {
 	case mstr8:
-		p, err = m.r.Peek(2)
+		p, err = m.r.Next(2)
 		if err != nil {
 			return
 		}
 		read = int(uint8(p[1]))
-		off = 2
 	case mstr16:
-		p, err = m.r.Peek(3)
+		p, err = m.r.Next(3)
 		if err != nil {
 			return
 		}
 		read = int(big.Uint16(p[1:]))
-		off = 3
 	case mstr32:
-		p, err = m.r.Peek(5)
+		p, err = m.r.Next(5)
 		if err != nil {
 			return
 		}
 		read = int(big.Uint32(p[1:]))
-		off = 5
 	default:
 		err = TypeError{Method: StrType, Encoded: getType(lead)}
 		return
 	}
-	k := read + off
-	p, err = m.r.Peek(k)
+fill:
+	if read == 0 {
+		s, err = "", nil
+		return
+	}
+	out := make([]byte, read)
+	_, err = m.r.ReadFull(out)
 	if err != nil {
 		return
 	}
-	s = string(p[off:])
-	_, err = m.r.Skip(k)
+	s = UnsafeString(out)
 	return
 }
 

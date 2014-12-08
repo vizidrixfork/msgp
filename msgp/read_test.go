@@ -287,7 +287,7 @@ func TestReadBytes(t *testing.T) {
 		}
 
 		if !bytes.Equal(bts, out) {
-			t.Errorf("Test case %d: Bytes not equal.", i)
+			t.Errorf("test case %d: Bytes not equal.", i)
 		}
 
 	}
@@ -298,7 +298,7 @@ func TestReadString(t *testing.T) {
 	wr := NewWriter(&buf)
 	rd := NewReader(&buf)
 
-	sizes := []int{0, 1, 225, int(tuint32)}
+	sizes := []int{0, 1, 225, int(math.MaxUint16 + 5)}
 	for i, size := range sizes {
 		buf.Reset()
 		in := string(RandBytes(size))
@@ -317,7 +317,8 @@ func TestReadString(t *testing.T) {
 			t.Errorf("test case %d: %s", i, err)
 		}
 		if out != in {
-			t.Errorf("Test case %d: strings not equal.", i)
+			t.Errorf("test case %d: strings not equal.", i)
+			t.Errorf("string (len = %d) in; string (len = %d) out", size, len(out))
 		}
 
 	}

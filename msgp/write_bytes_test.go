@@ -143,6 +143,8 @@ func TestAppendString(t *testing.T) {
 		bts = AppendString(bts[0:0], s)
 		if !bytes.Equal(buf.Bytes(), bts) {
 			t.Errorf("for string of length %d, encoder wrote %d bytes and append wrote %d bytes", sz, buf.Len(), len(bts))
+			t.Errorf("WriteString prefix: %x", buf.Bytes()[0:5])
+			t.Errorf("Appendstring prefix: %x", bts[0:5])
 		}
 	}
 }

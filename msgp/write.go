@@ -228,20 +228,28 @@ func (mw *Writer) Write(p []byte) (int, error) {
 // implements io.WriteString
 func (mw *Writer) writeString(s string) error {
 	l := len(s)
+
+	// we have space; copy
 	if mw.avail() >= l {
 		o := len(mw.buf)
 		mw.buf = mw.buf[:o+l]
 		copy(mw.buf[o:], s)
 		return nil
 	}
-	err := mw.flush()
-	if err != nil {
+
+	// we need to flush one way
+	// or another.
+	if err := mw.flush(); err != nil {
 		return err
 	}
+
+	// shortcut: big strings go
+	// straight to the underlying writer
 	if l > cap(mw.buf) {
 		_, err := io.WriteString(mw.w, s)
 		return err
 	}
+
 	mw.buf = mw.buf[:l]
 	copy(mw.buf, s)
 	return nil
@@ -507,7 +515,7 @@ func (mw *Writer) WriteBool(b bool) error {
 	return nil
 }
 
-// WriteString writes a string to the writer.
+// WriteString writes a messagepack string to the writer.
 // (This is NOT an implementation of io.StringWriter)
 func (mw *Writer) WriteString(s string) error {
 	sz := uint32(len(s))
@@ -516,9 +524,9 @@ func (mw *Writer) WriteString(s string) error {
 	switch {
 	case sz < 32:
 		mw.buf = append(mw.buf, wfixstr(uint8(sz)))
-	case sz < 256:
+	case sz < math.MaxUint8:
 		mw.buf = append(mw.buf, mstr8, byte(sz))
-	case sz < (1<<16)-1:
+	case sz < math.MaxUint16:
 		o, err := mw.require(3)
 		if err != nil {
 			return err
