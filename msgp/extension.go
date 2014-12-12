@@ -17,12 +17,9 @@ const (
 )
 
 var (
-	extensionReg map[int8]func() Extension
-)
-
-func init() {
+	// global map of registered extension types
 	extensionReg = make(map[int8]func() Extension)
-}
+)
 
 // RegisterExtension registers extensions so that they
 // can be initialized and returned by methods that
@@ -37,7 +34,17 @@ func init() {
 //
 //  msgp.RegisterExtension(10, func() msgp.Extension { &MyExtension{} })
 //
+// RegisterExtension will panic if you call it multiple times
+// with the same 'typ' argument, or if you use a reserved
+// type (3, 4, or 5).
 func RegisterExtension(typ int8, f func() Extension) {
+	switch typ {
+	case 3, 4, 5:
+		panic(fmt.Sprint("msgp: forbidden extension type:", typ))
+	}
+	if _, ok := extensionReg[typ]; ok {
+		panic(fmt.Sprint("msgp: RegisterExtension() called with typ", typ, "more than once"))
+	}
 	extensionReg[typ] = f
 }
 
@@ -53,6 +60,9 @@ type ExtensionTypeError struct {
 func (e ExtensionTypeError) Error() string {
 	return fmt.Sprintf("msgp: error decoding extension: wanted type %d; got type %d", e.Want, e.Got)
 }
+
+// Resumable returns 'true' for ExtensionTypeErrors
+func (e ExtensionTypeError) Resumable() bool { return true }
 
 func errExt(got int8, wanted int8) error {
 	return ExtensionTypeError{Got: got, Want: wanted}

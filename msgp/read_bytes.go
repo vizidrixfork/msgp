@@ -2,10 +2,8 @@ package msgp
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 	"unsafe"
 )
@@ -14,10 +12,38 @@ var (
 	// ErrShortBytes is returned when the
 	// slice being decoded is too short to
 	// contain the contents of the message
-	ErrShortBytes = errors.New("msgp: too few bytes left to read object")
+	ErrShortBytes = errShort{}
+
+	// this error is only returned
+	// if we reach code that should
+	// be unreachable
+	fatal = errFatal{}
 )
 
+type errShort struct{}
+
+func (e errShort) Error() string   { return "msgp: too few bytes left to read object" }
+func (e errShort) Resumable() bool { return true }
+
+type errFatal struct{}
+
+func (f errFatal) Error() string   { return "msgp: fatal decoding error" }
+func (f errFatal) Resumable() bool { return false }
+
 var big = binary.BigEndian
+
+// Error is the interface satisfied
+// by all of the errors returned by
+// this package.
+type Error interface {
+	error
+
+	// Resumable returns whether
+	// or not the error means that
+	// the stream of data is malformed
+	// and  the information is unrecoverable.
+	Resumable() bool
+}
 
 // IsNil returns true if len(b)>0 and
 // the leading byte is a 'nil' MessagePack
@@ -25,27 +51,6 @@ var big = binary.BigEndian
 func IsNil(b []byte) bool {
 	if len(b) > 0 && b[0] == mnil {
 		return true
-	}
-	return false
-}
-
-// IsError returns whether or not
-// an error belongs to the msgp package.
-// (This is useful for determining if an
-// error was an i/o error as opposed to
-// an encoding error.)
-func IsError(err error) bool {
-	if err != nil {
-		if err == ErrShortBytes {
-			return true
-		}
-		switch err.(type) {
-		case IntOverflow, UintOverflow, TypeError,
-			ArrayError, InvalidPrefixError, ExtensionTypeError:
-			return true
-		default:
-			return strings.HasPrefix(err.Error(), "msgp")
-		}
 	}
 	return false
 }
@@ -63,6 +68,8 @@ func (i IntOverflow) Error() string {
 	return fmt.Sprintf("msgp: %d overflows int%d", i.Value, i.FailedBitsize)
 }
 
+func (i IntOverflow) Resumable() bool { return true }
+
 // UintOverflow is returned when a call
 // would downcast an unsigned integer to a type
 // with too few bits to hold its value
@@ -75,6 +82,8 @@ type UintOverflow struct {
 func (u UintOverflow) Error() string {
 	return fmt.Sprintf("msgp: %d overflows uint%d", u.Value, u.FailedBitsize)
 }
+
+func (u UintOverflow) Resumable() bool { return true }
 
 // ReadMapHeaderBytes reads a map header size
 // from 'b' and returns the remaining bytes.

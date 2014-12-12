@@ -30,6 +30,8 @@ func (a ArrayError) Error() string {
 	return fmt.Sprintf("msgp: wanted array of size %d; got %d", a.Wanted, a.Got)
 }
 
+func (a ArrayError) Resumable() bool { return true }
+
 // Type is a MessagePack wire type,
 // including this package's built-in
 // extension types.
@@ -91,8 +93,7 @@ func (t Type) String() string {
 	}
 }
 
-// TypeError represents a decoding type error.
-// TypeErrors are returned when a particular
+// A TypeError is returned when a particular
 // decoding method is unsuitable for decoding
 // a particular MessagePack value.
 type TypeError struct {
@@ -105,14 +106,21 @@ func (t TypeError) Error() string {
 	return fmt.Sprintf("msgp: attempted to decode type %q with method for %q", t.Encoded, t.Method)
 }
 
+// Resumable returns 'true' for TypeErrors
+func (t TypeError) Resumable() bool { return true }
+
 // InvalidPrefixError is returned when a bad encoding
-// uses a prefix that is not recognized in the MessagePack standard
+// uses a prefix that is not recognized in the MessagePack standard.
+// This kind of error is unrecoverable.
 type InvalidPrefixError byte
 
 // Error implements the error interface
 func (i InvalidPrefixError) Error() string {
 	return fmt.Sprintf("msgp: unrecognized type prefix 0x%x", byte(i))
 }
+
+// Resumable returns 'false' for InvalidPrefixErrors
+func (i InvalidPrefixError) Resumable() bool { return false }
 
 func init() {
 	readerPool.New = func() interface{} {
@@ -140,7 +148,8 @@ func pushReader(m *Reader) {
 // by other processes. It is not necessary
 // to call FreeR on a reader. However, maintaining
 // a reference to a *Reader after calling FreeR on
-// it will cause undefined behavior.
+// it will cause undefined behavior. Typically, this
+// function should only be used by the code generator.
 func FreeR(m *Reader) {
 	pushReader(m)
 }
@@ -193,20 +202,21 @@ type Reader struct {
 	scratch []byte // recycled []byte for temporary storage
 }
 
-// Read implements io.Reader
+// Read implements `io.Reader`
 func (m *Reader) Read(p []byte) (int, error) {
 	return m.r.Read(p)
 }
 
-// ReadFull implements io.ReadFull
+// ReadFull implements `io.ReadFull`
 func (m *Reader) ReadFull(p []byte) (int, error) {
 	return m.r.ReadFull(p)
 }
 
-// Reset resets the underlying reader
-func (m *Reader) Reset(r io.Reader) {
-	m.r.Reset(r)
-}
+// Reset resets the underlying reader.
+func (m *Reader) Reset(r io.Reader) { m.r.Reset(r) }
+
+// Buffered returns the number of bytes currently in the read buffer.
+func (m *Reader) Buffered() int { return m.r.Buffered() }
 
 // NextType returns the next object type to be decoded.
 func (m *Reader) NextType() (Type, error) {
@@ -239,10 +249,7 @@ func (m *Reader) NextType() (Type, error) {
 // the next byte is a null messagepack byte
 func (m *Reader) IsNil() bool {
 	p, err := m.r.Peek(1)
-	if err != nil {
-		return false
-	}
-	return p[0] == mnil
+	return err == nil && p[0] == mnil
 }
 
 // returns (obj size, obj elements, error)
@@ -591,17 +598,17 @@ func (m *Reader) ReadInt64() (i int64, err error) {
 		return
 	}
 	lead = p[0]
+
 	if isfixint(lead) {
 		i = int64(rfixint(lead))
 		_, err = m.r.Skip(1)
 		return
-	}
-	// try to decode negative fixnum
-	if isnfixint(lead) {
+	} else if isnfixint(lead) {
 		i = int64(rnfixint(lead))
 		_, err = m.r.Skip(1)
 		return
 	}
+
 	switch lead {
 	case mint8:
 		p, err = m.r.Next(2)
@@ -835,23 +842,6 @@ func (m *Reader) ReadBytes(scratch []byte) (b []byte, err error) {
 	_, err = m.r.ReadFull(b)
 	return
 }
-
-/*
-func readN(r *Reader, scratch []byte, off int, read int) (b []byte, err error) {
-	_, err = r.r.Skip(off)
-	if err != nil {
-		return
-	}
-	if read > 0 {
-		if read > cap(scratch) {
-			b = make([]byte, read)
-		} else {
-			b = scratch[0:read]
-		}
-		_, err = r.r.ReadFull(b)
-	}
-	return
-}*/
 
 // ReadStringAsBytes reads a MessagePack 'str' (utf-8) string
 // and returns its value as bytes. It may use 'scratch' for storage

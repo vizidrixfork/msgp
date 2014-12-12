@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io"
 	"strconv"
 	"time"
@@ -88,7 +87,7 @@ func rwNext(w jsWriter, src *Reader) (int, error) {
 		return rwMap(w, src)
 	default:
 		// we shouldn't get here; NextType() errors if the type is not recognized
-		return 0, errors.New("msgp: bad encoding; unrecognized type prefix")
+		return 0, fatal
 	}
 }
 

@@ -184,10 +184,11 @@ func (mw *Writer) Buffered() int { return len(mw.buf) }
 func (mw *Writer) avail() int { return cap(mw.buf) - len(mw.buf) }
 
 func (mw *Writer) require(n int) (int, error) {
-	if mw.avail() >= n {
-		o := len(mw.buf)
-		mw.buf = mw.buf[:o+n] // grow by 'n'; return old offset
-		return o, nil
+	l := len(mw.buf)
+	c := cap(mw.buf)
+	if c-l >= n {
+		mw.buf = mw.buf[:l+n] // grow by 'n'; return old offset
+		return l, nil
 	}
 	err := mw.flush()
 	if err != nil {
@@ -195,12 +196,27 @@ func (mw *Writer) require(n int) (int, error) {
 	}
 	// after flush,
 	// len(mw.buf) = 0
-	if n > cap(mw.buf) {
+	if n > c {
 		mw.buf = make([]byte, n)
 		return 0, nil
 	}
 	mw.buf = mw.buf[:n]
 	return 0, nil
+}
+
+// push one byte onto the buffer
+func (mw *Writer) push(b byte) error {
+	l := len(mw.buf)
+	if l == cap(mw.buf) {
+		err := mw.flush()
+		if err != nil {
+			return err
+		}
+		l = 0
+	}
+	mw.buf = mw.buf[:l+1]
+	mw.buf[l] = b
+	return nil
 }
 
 // Write implements io.Writer, and writes
@@ -302,8 +318,7 @@ func (mw *Writer) Reset(w io.Writer) {
 func (mw *Writer) WriteMapHeader(sz uint32) error {
 	switch {
 	case sz < 16:
-		mw.buf = append(mw.buf, wfixmap(uint8(sz)))
-		return nil
+		return mw.push(wfixmap(uint8(sz)))
 
 	case sz < 1<<16-1:
 		o, err := mw.require(3)
@@ -328,8 +343,8 @@ func (mw *Writer) WriteMapHeader(sz uint32) error {
 func (mw *Writer) WriteArrayHeader(sz uint32) error {
 	switch {
 	case sz < 16:
-		mw.buf = append(mw.buf, wfixarray(uint8(sz)))
-		return nil
+		return mw.push(wfixarray(uint8(sz)))
+
 	case sz < math.MaxUint16:
 		o, err := mw.require(3)
 		if err != nil {
@@ -337,6 +352,7 @@ func (mw *Writer) WriteArrayHeader(sz uint32) error {
 		}
 		prefixu16(mw.buf[o:], marray16, uint16(sz))
 		return nil
+
 	default:
 		o, err := mw.require(5)
 		if err != nil {
@@ -349,8 +365,7 @@ func (mw *Writer) WriteArrayHeader(sz uint32) error {
 
 // WriteNil writes a nil byte to the buffer
 func (mw *Writer) WriteNil() error {
-	mw.buf = append(mw.buf, mnil)
-	return nil
+	return mw.push(mnil)
 }
 
 // WriteFloat64 writes a float64 to the writer
@@ -380,15 +395,18 @@ func (mw *Writer) WriteInt64(i int64) error {
 	a := abs(i)
 	switch {
 	case i < 0 && i > -32:
-		mw.buf = append(mw.buf, wnfixint(int8(i)))
-		return nil
+		return mw.push(wnfixint(int8(i)))
 
 	case i >= 0 && i < 128:
-		mw.buf = append(mw.buf, wfixint(uint8(i)))
-		return nil
+		return mw.push(wfixint(uint8(i)))
 
 	case a < math.MaxInt8:
-		mw.buf = append(mw.buf, mint8, byte(int8(i)))
+		o, err := mw.require(2)
+		if err != nil {
+			return err
+		}
+		mw.buf[o] = mint8
+		mw.buf[o+1] = byte(int8(i))
 		return nil
 
 	case a < math.MaxInt16:
@@ -434,10 +452,15 @@ func (mw *Writer) WriteInt(i int) error { return mw.WriteInt64(int64(i)) }
 func (mw *Writer) WriteUint64(u uint64) error {
 	switch {
 	case u < (1 << 7):
-		mw.buf = append(mw.buf, wfixint(uint8(u)))
-		return nil
+		return mw.push(wfixint(uint8(u)))
+
 	case u < math.MaxUint8:
-		mw.buf = append(mw.buf, muint8, byte(uint8(u)))
+		o, err := mw.require(2)
+		if err != nil {
+			return err
+		}
+		mw.buf[o] = muint8
+		mw.buf[o+1] = byte(uint8(u))
 		return nil
 	case u < math.MaxUint16:
 		o, err := mw.require(3)
@@ -485,13 +508,20 @@ func (mw *Writer) WriteBytes(b []byte) error {
 	// write size
 	switch {
 	case sz < math.MaxUint8:
-		mw.buf = append(mw.buf, mbin8, byte(sz))
+		o, err := mw.require(2)
+		if err != nil {
+			return err
+		}
+		mw.buf[o] = mbin8
+		mw.buf[o+1] = byte(uint8(sz))
+
 	case sz < math.MaxUint16:
 		o, err := mw.require(3)
 		if err != nil {
 			return err
 		}
 		prefixu16(mw.buf[o:], mbin16, uint16(sz))
+
 	default:
 		o, err := mw.require(5)
 		if err != nil {
@@ -508,11 +538,9 @@ func (mw *Writer) WriteBytes(b []byte) error {
 // WriteBool writes a bool to the writer
 func (mw *Writer) WriteBool(b bool) error {
 	if b {
-		mw.buf = append(mw.buf, mtrue)
-		return nil
+		return mw.push(mtrue)
 	}
-	mw.buf = append(mw.buf, mfalse)
-	return nil
+	return mw.push(mfalse)
 }
 
 // WriteString writes a messagepack string to the writer.
@@ -523,9 +551,17 @@ func (mw *Writer) WriteString(s string) error {
 	// write size
 	switch {
 	case sz < 32:
-		mw.buf = append(mw.buf, wfixstr(uint8(sz)))
+		err := mw.push(wfixstr(uint8(sz)))
+		if err != nil {
+			return err
+		}
 	case sz < math.MaxUint8:
-		mw.buf = append(mw.buf, mstr8, byte(sz))
+		o, err := mw.require(2)
+		if err != nil {
+			return err
+		}
+		mw.buf[o] = mstr8
+		mw.buf[o+1] = byte(uint8(sz))
 	case sz < math.MaxUint16:
 		o, err := mw.require(3)
 		if err != nil {
