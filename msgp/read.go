@@ -14,23 +14,10 @@ import (
 
 var (
 	// where we keep old *Readers
-	readerPool sync.Pool
+	readerPool = sync.Pool{
+		New: func() interface{} { return &Reader{} },
+	}
 )
-
-// ArrayError is an error returned
-// when decoding a fix-sized array
-// of the wrong size
-type ArrayError struct {
-	Wanted uint32
-	Got    uint32
-}
-
-// Error implements the error interface
-func (a ArrayError) Error() string {
-	return fmt.Sprintf("msgp: wanted array of size %d; got %d", a.Wanted, a.Got)
-}
-
-func (a ArrayError) Resumable() bool { return true }
 
 // Type is a MessagePack wire type,
 // including this package's built-in
@@ -90,41 +77,6 @@ func (t Type) String() string {
 		return "nil"
 	default:
 		return "<invalid>"
-	}
-}
-
-// A TypeError is returned when a particular
-// decoding method is unsuitable for decoding
-// a particular MessagePack value.
-type TypeError struct {
-	Method  Type // Type expected by method
-	Encoded Type // Type actually encoded
-}
-
-// Error implements the error interface
-func (t TypeError) Error() string {
-	return fmt.Sprintf("msgp: attempted to decode type %q with method for %q", t.Encoded, t.Method)
-}
-
-// Resumable returns 'true' for TypeErrors
-func (t TypeError) Resumable() bool { return true }
-
-// InvalidPrefixError is returned when a bad encoding
-// uses a prefix that is not recognized in the MessagePack standard.
-// This kind of error is unrecoverable.
-type InvalidPrefixError byte
-
-// Error implements the error interface
-func (i InvalidPrefixError) Error() string {
-	return fmt.Sprintf("msgp: unrecognized type prefix 0x%x", byte(i))
-}
-
-// Resumable returns 'false' for InvalidPrefixErrors
-func (i InvalidPrefixError) Resumable() bool { return false }
-
-func init() {
-	readerPool.New = func() interface{} {
-		return &Reader{}
 	}
 }
 

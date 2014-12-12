@@ -31,24 +31,15 @@ type Sizer interface {
 
 var (
 	// Nowhere is an io.Writer to nowhere
-	Nowhere io.Writer
+	Nowhere io.Writer = nwhere{}
 
-	btsType    reflect.Type
-	writerPool sync.Pool
-)
-
-func init() {
-	var bts []byte
-	btsType = reflect.TypeOf(bts)
-
-	writerPool.New = func() interface{} {
-		return &Writer{
-			buf: make([]byte, 0, 512),
-		}
+	btsType    = reflect.TypeOf(([]byte)(nil))
+	writerPool = sync.Pool{
+		New: func() interface{} {
+			return &Writer{buf: make([]byte, 0, 1024)}
+		},
 	}
-
-	Nowhere = nwhere{}
-}
+)
 
 func popWriter(w io.Writer) *Writer {
 	wr := writerPool.Get().(*Writer)
